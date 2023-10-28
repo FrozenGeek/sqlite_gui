@@ -1,0 +1,130 @@
+# openrvdas_nginx.conf
+user            RVDAS_USER;
+error_log       /var/log/openrvdas/nginx.stderr;
+
+worker_processes  auto;
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       NGINX_FILES/mime.types;
+    # Be sure to include additionally types in the same scope where
+    # you import mime.types, or your types will be a complete over-ride.
+    types {
+        application/json    json5;
+        application/wasm    wasm;
+    }
+
+    gzip_static   on;
+
+    # Section will be commented out if we're not using SSL
+    ssl_certificate     OPENRVDAS_ROOT/openrvdas.crt;
+    ssl_certificate_key OPENRVDAS_ROOT/openrvdas.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+
+    ssl_prefer_server_ciphers on;
+
+    sendfile        on;
+    #tcp_nopush     on;
+    keepalive_timeout  65;
+
+    # Half-working config for Supervisor, but it makes XMLRPC work
+    # over https with CORS, so we can query status.  GUI basically
+    # works, but when you click a button you need to reload the page.
+    server {
+        listen	*:9000 ssl;
+        server_name _;
+
+        location / {
+            # Supervisor web interface over https
+            include OPENRVDAS_ROOT/sqlite_gui/nginx/nginx_cors.conf;
+            proxy_pass http://localhost:9001;
+            proxy_http_version 1.1;
+            proxy_buffering off;
+            proxy_redirect default;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header Connection "";
+        }
+    }           
+               
+    # OpenRVDAS HTTPS server for SQLite GUI.
+    server {
+        # the port your site will be served on; typically 443
+        listen      *:443 ssl http2;
+        server_name _; # accept any host name
+        charset     utf-8;
+
+        # max upload size
+        client_max_body_size 75M;   # adjust to taste
+
+        location /display {
+            alias OPENRVDAS_ROOT/display/html; # display pages
+            autoindex on;
+        }
+
+        location /docs {
+            alias OPENRVDAS_ROOT/docs; # project doc files
+            autoindex on;
+        }
+
+        # Internally, Cached Data Server operates on port 8766; we proxy
+        # it externally, serve cached data server at 443/cds-ws
+        location /cds-ws {
+            proxy_pass http://localhost:8766;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "Upgrade";
+            proxy_set_header Host $host;
+        }
+
+        #
+        # Added by KPed so Markdown renders in the browser
+        # See https://gist.github.com/shukebeta/b7435d02892cb2ad2b9c8d56572adb2b
+        #
+        location ~ /.*\.md {
+            root OPENRVDAS_ROOT;
+            default_type text/html;
+            charset UTF-8;
+            add_before_body /js/StrapDown.js/prepend;
+            add_after_body /js/StrapDown.js/postpend;
+        }
+
+        # Attempt #137 to make supervisor hide behind port 443
+        location ^~ /supervisor/ {
+            rewrite ^/supervisor(/.*) $1 break;
+            proxy_pass http://localhost:9001;
+            proxy_set_header Host $host/supervisor;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+
+        # This only works if you turn on fcgiwrap
+        location /cgi-bin/ {
+            root OPENRVDAS_ROOT/sqlite_gui;
+            fastcgi_pass  unix://FCGI_SOCKET;
+            fastcgi_param HTTP_AUTHORIZATION $http_authorization;
+            include       NGINX_FILES/fastcgi_params;
+            fastcgi_pass_header Authorization;
+            fastcgi_pass_request_headers on;
+            fastcgi_param SCRIPT_FILENAME OPENRVDAS_ROOT/sqlite_gui/$fastcgi_script_name;
+        }
+
+        # Javascript and css in the /js subdir.
+        location /js/ {
+            ssi on;
+            autoindex on;
+            root OPENRVDAS_ROOT/sqlite_gui;
+        }
+        # Everything else gets handled normally.
+        location / {
+            ssi on;
+            autoindex on;
+            root OPENRVDAS_ROOT/sqlite_gui/html;
+        }
+    }
+}

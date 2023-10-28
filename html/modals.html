@@ -1,0 +1,93 @@
+<!-- 
+
+    @/modals.html
+
+    contains the HTML for the modal dialogues for
+    changing logger_manager mode or individual logger
+    modes.
+
+    Modals are the new popup.  Popups are the old
+    dead to me.
+
+    Basic premise here is that the modals get filled in
+    by an fetch to a CGI (written in python), and
+    submit changes via POST to the same script.
+
+    Associated javascript file(s) is/are planned, but for the 
+    moment the associated code is here inside a <script> tag.
+-->
+
+
+<!-- Change Cruise Mode Modal Dialogue-->
+<div class="modal fade" id="CruiseModeModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="CruiseModalLabel">Change Cruise Mode</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" 
+            action="/cgi-bin/cruise_mode.cgi"
+            onsubmit="CGI.AjaxPost(event, this, 'CruiseModeModal')">
+      <div class="modal-body" id="CruiseModeModalBody"></div>
+      <div id="ChangeMode_modalfooter" class="modal-footer">
+        <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Close</button>
+        <button type="submit" class="btn btn-primary">Apply Change</button>
+      </div>
+      </form>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- End Change Cruise Mode Modal -->
+
+<!-- Logger Mode Modal -->
+<div class="modal fade" 
+     id="LoggerModal"
+     tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="LoggerModalTitle">Change Logger Mode</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" 
+            action="/cgi-bin/logger_mode.cgi"
+            onsubmit="CGI.AjaxPost(event, this, 'LoggerModal')">
+      <div class="modal-body" id="LoggerModeModalBody"></div>
+      <div id="Logger_modalfooter" class="modal-footer">
+        <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Close</button>
+        <button type="submit" class="btn btn-primary">Apply Change</button>
+      </div>
+      </form>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Logger Mode Modal -->
+
+
+<!-- Load Config Modal -->
+<div class="modal fade"
+     id="LoadButton_Modal"
+     tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Load Config File</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post"
+            action="/cgi-bin/file_browser.cgi"
+            onsubmit="CGI.AjaxPost(event, this, 'LoadButton_Modal')">
+      <div class="modal_body" id="LoadButtonModeModalBody"></div>
+      <div id="LoadButton_mb" class="modal-body"></div>
+      <div id="LoadButton_modalfooter" class="modal-footer">
+        <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Close</button>
+        <button type="submit" class="btn btn-primary">Confirm?</button>
+      </div>
+      </form>
+      </div>
+    </div>
+  </div>
+</div>

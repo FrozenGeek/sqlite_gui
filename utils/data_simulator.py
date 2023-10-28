@@ -38,8 +38,7 @@ import os
 import pty
 import pwd
 import re
-import setproctitle
-# import sys
+import sys
 import threading
 import time
 import yaml
@@ -173,8 +172,6 @@ def reader_thread(stop_event, key):
     # Set up regex for <iso8601> <data string>
     re_iso8601 = r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.?\d*)Z?\s+(.*)$'
     re_logged_data = re.compile(re_iso8601)
-    # Set process name for monitoring purposes
-    setproctitle.setthreadtitle("Simulated: %s" % key)
     # Get timestamp delta between now and the first data item
     dt = config.get('start_time', 0)
     ts_delta = time.time() - dt
@@ -304,7 +301,7 @@ def sanity_check_config():
 # 'config' needs to be global so at_exit can see it.
 # That or we make this a class.
 if __name__ == "__main__":
-    setproctitle.setproctitle("Simulated data pump")
+    print("Running on python %s" % sys.version)
     # Would be nice to make the thing a class, so everyone can play.
     parser = argparse.ArgumentParser(
                  prog='Data Sim',

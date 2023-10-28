@@ -1,0 +1,19 @@
+# Stored prefs file
+.install_sqlite_gui_preferences
+
+# Changeable file generated from secret.py.dist
+cgi-bin/openrvdas_vars.py
+cgi-bin/secret.py
+cgi-bin/secret.pye
+
+# Database where state is stored
+openrvdas.sql
+
+# Installation-modified version of nginx/nginx_sqlite.conf.dist
+nginx/nginx_sqlite.conf
+nginx/nginx_sqlite.confe
+
+# Pycharm directory
+.idea
+
+__pycache__

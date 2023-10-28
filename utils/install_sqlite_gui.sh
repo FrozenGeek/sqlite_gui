@@ -1,4 +1,15 @@
-#!/bin/bash
+#!/bin/bash -e
+
+# OpenRVDAS is available as open source under the MIT License at
+#   https:/github.com/oceandatatools/openrvdas
+#
+# A separate SQLite-based GUI for OpenRVDAS, developed by Kevin Pedigo,
+# is available at
+#   https://github.com/FrozenGeek/sqlite_gui
+#
+# This script is a part of the SQLite-based GUI. It installs the additional
+# packages needed for the GUI to run, and reconfigures OpenRVDAS to use it
+# by default.
 
 # Warning:  Bashism's ahead.
 ########################################
@@ -6,16 +17,85 @@
 # Initial default values
 #
 ########################################
-RANDOM_SECRET=0
-MAKE_CERT=0
-USE_HTTP=0
+PREFERENCES_FILE='.install_sqlite_gui_preferences'
 
-########################################
-#
-# If a preferences file exists, use it
-#
-########################################
-[ -e .sqlitegui.prefs ] && source .sqlitegui.prefs
+###########################################################################
+###########################################################################
+function exit_gracefully {
+    echo Exiting.
+
+    # Try deactivating virtual environment, if it's active
+    if [ -n "$INSTALL_ROOT" ];then
+        deactivate
+    fi
+    return -1 2> /dev/null || exit -1  # exit correctly if sourced/bashed
+}
+
+#########################################################################
+#########################################################################
+# Return a normalized yes/no for a value
+yes_no() {
+    QUESTION=$1
+    DEFAULT_ANSWER=$2
+
+    while true; do
+        read -p "$QUESTION ($DEFAULT_ANSWER) " yn
+        case $yn in
+            [Yy]* )
+                YES_NO_RESULT=yes
+                break;;
+            [Nn]* )
+                YES_NO_RESULT=no
+                break;;
+            "" )
+                YES_NO_RESULT=$DEFAULT_ANSWER
+                break;;
+            * ) echo "Please answer yes or no.";;
+        esac
+    done
+}
+
+
+###########################################################################
+###########################################################################
+# Read any pre-saved default variables from file
+function set_default_variables {
+    # Defaults that will be overwritten by the preferences file, if it
+    # exists.
+    OPENRVDAS_ROOT='/opt/openrvdas'
+    RVDAS_USER='rvdas'
+    RANDOM_SECRET=yes
+    MAKE_CERT=no
+    USE_HTTP=no
+
+    # Read in the preferences file, if it exists, to overwrite the defaults.
+    if [ -e $PREFERENCES_FILE ]; then
+        echo "#####################################################################"
+        echo Reading pre-saved defaults from "$PREFERENCES_FILE"
+        source $PREFERENCES_FILE
+    fi
+}
+
+###########################################################################
+###########################################################################
+# Save defaults in a preferences file for the next time we run.
+function save_default_variables {
+    cat > $PREFERENCES_FILE <<EOF
+# Defaults written by/to be read by install_sqlite_gui.sh
+OS_TYPE=${OS_TYPE}
+OPENRVDAS_ROOT=${OPENRVDAS_ROOT}
+RVDAS_USER=${RVDAS_USER}
+MAKE_CERT=${MAKE_CERT}
+USE_HTTP=${USE_HTTP}
+
+# For security purposes, do not save SECRET in prefs file ??
+# [[ -n "${SECRET}" ]] && echo "SECRET=\"${SECRET}\""
+RANDOM_SECRET=${RANDOM_SECRET}
+EOF
+}
+
+# On exit, save default variables
+trap save_default_variables EXIT
 
 ########################################
 #
@@ -43,76 +123,14 @@ function show_help {
     echo "             Darwin - use for apple products"
     echo " -secret <\"quoted text\">   Secret for CGI's to use for auth"
     echo " -randomsecret  Generate a random secret"
+    echo " -user <OpenRVDAS user name>"
     echo " -http       Use (non-secure) http instead of https"
     echo
     echo "On exiting the script, preferences will be written out"
 }
 
-# On exit, create prefs file
-function on_exit {
-    echo "Writing preferences file"
-    rm -f .sqlitegui.prefs
-    # Redirect all further output onto the prefs file
-    exec > .sqlitegui.prefs
-    echo "OS_TYPE=${OS_TYPE}"
-    echo "MAKE_CERT=${MAKE_CERT}"
-    echo "BASEDIR=${BASEDIR}"
-    echo "USE_HTTP=${USE_HTTP}"
-    echo "RANDOM_SECRET=${RANDOM_SECRET}"
-    # For security purposes, do not save SECRET in prefs file ??
-    # [[ -n "${SECRET}" ]] && echo "SECRET=\"${SECRET}\""
-}
-trap on_exit EXIT
-
-while [ $# -gt 0 ] ; do
-    case "$1" in
-         -f)
-             if [ -f $2 ] ; then
-                 source $2
-             else
-                 echo "Config file not found: $2"
-             fi
-             shift
-             ;;
-         -makecert)
-             MAKE_CERT=1
-             ;;
-         -nomakecert)
-             MAKE_CERT=0
-             ;;
-         -OS_TYPE)
-             OS_TYPE=$2
-             shift
-             ;;
-         -basedir)
-             if [ -d $2 ] ; then
-                 BASEDIR=$2
-             else
-                 echo "basedir not a directory: $2"
-             fi
-             shift
-             ;;
-         -randomsecret)
-             RANDOM_SECRET=1
-             ;;
-         -secret)
-             SECRET=$2
-             shift
-             ;;
-         -http)
-             USE_HTTP=1
-             ;;
-         -h)
-             show_help
-             exit
-             ;;
-         *)
-             echo "Ignoring unknown option: $1"
-             ;;
-    esac
-    shift
-done
-
+###########################################################################
+###########################################################################
 function ask_os_type {
     declare -A allowed
     allowed[CentOS]=CentOS
@@ -126,11 +144,13 @@ function ask_os_type {
     done
 }
 
+###########################################################################
+###########################################################################
 function determine_flavor {
     # We don't need to check versions because they're already
     # running OpenRVDAS.  Simplified.  Just get the flavor.
     if [ `uname -s` == 'Darwin' ] ; then
-        OS_TYPE=MacOS
+        OS_TYPE='MacOS'
         return
     fi
     LIKE=`grep -i "id_like" /etc/os-release`
@@ -139,139 +159,356 @@ function determine_flavor {
     # This will work on debian, ubuntu, RaspiOS, etc...
     [[ ${LIKE} =~ 'debian' ]] && OS_TYPE='Ubuntu'
     # SUSE/OpenSUSE say "suse" in the id_like
+
+    echo "#####################################################################"
+    echo "Detected OS = $OS_TYPE"
 }
 
-### Supervisor
+###########################################################################
+###########################################################################
+### supervisor
 function setup_supervisor {
     echo "Setting up the supervisor config for SQLite GUI"
     if [ $OS_TYPE == 'MacOS' ]; then
-        SUPERVISOR_DIR=/usr/local/etc/supervisor.d/
-        SUPERVISOR_FILE=$SUPERVISOR_DIR/openrvdas_sqlite.ini
+        SUPERVISOR_DIR=/usr/local/etc/supervisor.d
+        SUPERVISOR_SOCKET=/usr/local/var/run/supervisor.sock
+        SUPERVISOR_SOURCE_FILE=${OPENRVDAS_ROOT}/sqlite_gui/supervisor/openrvdas_sqlite.ini.macos
+        SUPERVISOR_TARGET_FILE=$SUPERVISOR_DIR/openrvdas_sqlite.ini
+        OLD_SUPERVISOR_FILE=$SUPERVISOR_DIR/openrvdas.ini
+
+        FCGI_PATH=/usr/local/homebrew
+        FCGI_SOCKET=/var/run/fcgiwrap.sock
+        NGINX_PATH=/usr/local/homebrew/bin
+        NGINX_FILES=/usr/local/etc/nginx
 
     # CentOS/RHEL
     elif [ $OS_TYPE == 'CentOS' ]; then
+
+        sudo ln -s -f /etc/nginx /usr/local/etc/nginx
+
         SUPERVISOR_DIR=/etc/supervisord.d
-        SUPERVISOR_FILE=$SUPERVISOR_DIR/openrvdas_sqlite.ini
+        SUPERVISOR_SOCKET=/var/run/supervisor/supervisor.sock
+        SUPERVISOR_SOURCE_FILE=${OPENRVDAS_ROOT}/sqlite_gui/supervisor/openrvdas_sqlite.ini
+        SUPERVISOR_TARGET_FILE=$SUPERVISOR_DIR/openrvdas_sqlite.ini
+        OLD_SUPERVISOR_FILE=$SUPERVISOR_DIR/openrvdas.ini
+
+        FCGI_PATH=/usr
+        FCGI_SOCKET=/var/run/supervisor/fcgiwrap.sock
+        NGINX_PATH=/usr/sbin
+        NGINX_FILES=/etc/nginx
 
     # Ubuntu/Debian
     elif [ $OS_TYPE == 'Ubuntu' ]; then
+
+        # Hack so that NGinx can look for files in same place whether we're on
+        # MacOS (/usr/local/etc/nginx) or Linux (/etc/nginx)
+        sudo ln -s -f /etc/nginx /usr/local/etc/nginx
+
         SUPERVISOR_DIR=/etc/supervisor/conf.d
-        SUPERVISOR_FILE=$SUPERVISOR_DIR/openrvdas_sqlite.conf
+        SUPERVISOR_SOCKET=/var/run/supervisor.sock
+        SUPERVISOR_SOURCE_FILE=${OPENRVDAS_ROOT}/sqlite_gui/supervisor/openrvdas_sqlite.ini
+        SUPERVISOR_TARGET_FILE=$SUPERVISOR_DIR/openrvdas_sqlite.conf
+        OLD_SUPERVISOR_FILE=$SUPERVISOR_DIR/openrvdas.conf
+
+        FCGI_PATH=/usr
+        FCGI_SOCKET=/var/run/fcgiwrap.sock
+        NGINX_PATH=/usr/sbin
+        NGINX_FILES=/etc/nginx
     fi
 
     if [ -n "${SUPERVISOR_DIR}" ] ; then
-        SOURCE=${BASEDIR}/sqlite_gui/Supervisor/openrvdas_sqlite.ini
-        DEST=${SUPERVISOR_FILE}
         if [ -f ${DEST} ] ; then
-            echo "Not overwriting existing supervisor config file"
+            yes_no "Overwrite existing supervisor config file? " "no"
+            OVERWRITE_CONFIG=$YES_NO_RESULT
         else
-            /bin/cp ${SOURCE} ${DEST}
+            OVERWRITE_CONFIG='no'
+        fi
+        if [ $OVERWRITE_CONFIG == 'yes' ]; then
+            #echo "Copying supervisor file \"${SUPERVISOR_SOURCE_FILE}\" to \"$SUPERVISOR_TARGET_FILE"
+            SUPERVISOR_TEMP_FILE='/tmp/openrvdas_sqlite.ini.tmp'
+            cp ${SUPERVISOR_SOURCE_FILE} ${SUPERVISOR_TEMP_FILE}
+
+            # First replace variables in the file with actual installation-specific values
+            $SED_IE "s#OPENRVDAS_ROOT#${OPENRVDAS_ROOT}#g" ${SUPERVISOR_TEMP_FILE}
+            $SED_IE "s#RVDAS_USER#${RVDAS_USER}#g" ${SUPERVISOR_TEMP_FILE}
+            $SED_IE "s#SUPERVISOR_SOCKET#${SUPERVISOR_SOCKET}#g" ${SUPERVISOR_TEMP_FILE}
+            $SED_IE "s#FCGI_PATH#${FCGI_PATH}#g" ${SUPERVISOR_TEMP_FILE}
+            $SED_IE "s#FCGI_SOCKET#${FCGI_SOCKET}#g" ${SUPERVISOR_TEMP_FILE}
+            $SED_IE "s#NGINX_PATH#${NGINX_PATH}#g" ${SUPERVISOR_TEMP_FILE}
+
+            # Then copy into place
+            sudo /bin/mv ${SUPERVISOR_TEMP_FILE} ${SUPERVISOR_TARGET_FILE}
+
+            ## Move old openrvdas config out of the way
+            #if [ -e "${OLD_SUPERVISOR_FILE}" ]; then
+            #    echo "Moving OpenRVDAS supervisor config file \"${OLD_SUPERVISOR_FILE}\" out of the way"
+            #    sudo /bin/mv -f ${OLD_SUPERVISOR_FILE} ${OLD_SUPERVISOR_FILE}.bak
+            #fi
         fi
     else
         echo "Unable to set up supervisor for you."
     fi
 }
 
+###########################################################################
+###########################################################################
 function normalize_path {
     echo $(cd ${1} ; echo ${PWD})
 }
 
+###########################################################################
+###########################################################################
+# Figure out which directory is root for OpenRVDAS code
+function get_openrvdas_root {
+    DEFAULT_OPENRVDAS_ROOT=$OPENRVDAS_ROOT
+    read -p "Path to OpenRVDAS installation? ($DEFAULT_OPENRVDAS_ROOT) " OPENRVDAS_ROOT
+    OPENRVDAS_ROOT=${OPENRVDAS_ROOT:-$DEFAULT_OPENRVDAS_ROOT}
 
-function get_basedir {
-    this_dir=${0%/*}
-    [[ $this_dir == $0 ]] && this_dir=${PWD}
-    cd $this_dir
-    [[ -f ../sqlite_server_api.py ]] && BASEDIR=`normalize_path "${PWD}/.."`
-    while [ -z "${BASEDIR}" ] ; do
-        echo "Enter the path to the sqlite_gui directory: "
-        read reply
-        if [ -d ${reply} ] ; then
-            BASEDIR=${reply}
-        else
-            echo "Nope:  try again"
-        fi
+    # Check that we're linked in. Arbitrarily, do it by looking for this file.
+    while [[ ! -f ${OPENRVDAS_ROOT}/sqlite_gui/utils/install_sqlite_gui.sh ]]; do
+        echo
+        echo "No \"sqlite_gui\" subdir found in OpenRVDAS installation at \"${OPENRVDAS_ROOT}\"."
+        echo "Please create a symlink from the sqlite_gui code to this directory, then hit"
+        read -p "\"Return\" to continue. "
     done
 }
 
+###########################################################################
+###########################################################################
 function make_certificate {
     SAVEPWD=${PWD}
-    cd ../nginx
-    if [ -f openrvdas.crt -a -f openrvdas.key ] ; then
-        echo "Looks like you already have required certificates."
-        echo "If you want to over-write them, cd to ../nginx"
-        echo "and run GenerateCert.sh"
+    cd ${OPENRVDAS_ROOT}
+    if [ -f ${OPENRVDAS_ROOT}/openrvdas.crt -a -f ${OPENRVDAS_ROOT}/openrvdas.key ] ; then
+        echo "Looks like you already have required certificates. If you"
+        echo "want to over-write them, run sqlite_gui/utils/generate_cert.sh"
     else
-        /bin/bash GenerateCert.sh
+        /bin/bash ${OPENRVDAS_ROOT}/sqlite_gui/utils/generate_cert.sh
     fi
     cd ${SAVEPWD}
 }
 
-function overwrite_logger_manager {
-    # FIXME"  This needs to be obsoleted.
-    # Save the original logger_manager
-    SERVERDIR=${BASEDIR}/server
-    SQLITESRV=${BASEDIR}/sqlite_gui/server
-    # /bin/cp ${SQLITESRV}/logger_manager.py ${SERVERDIR}/
-}
-
+###########################################################################
+###########################################################################
 function random_secret {
-    echo "Generating a random secret for CGI's"
     x=""
     count=`echo ${RANDOM} | cut -b1-2`
     for i in `seq 1 ${count}` ; do 
         x=${RANDOM}${x}${RANDOM}
     done
-    SECRET=`echo ${x} | md5sum - | cut -b1-32`
+    if [ ${OS_TYPE} == 'MacOS' ] ; then
+        SECRET=`echo ${x} | md5 | cut -b1-32`
+    else
+        SECRET=`echo ${x} | md5sum - | cut -b1-32`
+    fi
     echo ${SECRET}
 }
 
+###########################################################################
+###########################################################################
 function set_secret {
     # sed the secret into secret.py
-    echo "Setting the secret used for CGI's"
-    SAVEPWD=${PWD}
-    CGIDIR=../cgi-bin
-    cd ${CGIDIR}
-    /usr/bin/sed -ie "s/_SECRET = \".*\"/_SECRET = \"${SECRET}\""/ secret.py
-    /bin/rm =f secret.pye
+    echo "Setting the secret used for CGIs"
+    CGIDIR=$OPENRVDAS_ROOT/sqlite_gui/cgi-bin
+    /usr/bin/sed -e "s/_SECRET = \".*\"/_SECRET = \"${SECRET}\"/" $CGIDIR/secret.py.dist > $CGIDIR/secret.py
     unset SECRET
-    cd ${SAVEPWD}
 }
 
-function downgrade_nginx {
-    echo "Setting nginx to use (non-secure) port 80"
-    SAVEPWD=${SAVEPWD}
-    NGINXDIR=${BASEDIR}/sqlite_gui/nginx
-    SED="/usr/bin/sed -ie"
-    cd ${NGINXDIR}
-    # sure, http2 is cool, but sed the sadness.
-    ${SED} 's/listen.*9000.*/listen \*:9000;/' nginx_sqlite.conf
-    ${SED} 's/listen.*443.*/listen \*:80;/' nginx_sqlite.conf
-    rm -f nginx_sqlite.confe
-    :
-    cd ${SAVEPWD}
+###########################################################################
+###########################################################################
+function add_system_packages {
+    if [ $OS_TYPE == 'MacOS' ]; then
+        echo "Installing MacOS packages"
+        brew install spawn-fcgi fcgiwrap
+        brew link spawn-fcgi fcgiwrap
+    # CentOS/RHEL
+    elif [ $OS_TYPE == 'CentOS' ]; then
+        echo "Installing CentOS packages"
+        sudo yum install -y spawn-fcgi fcgiwrap
+    # Ubuntu/Debian
+    elif [ $OS_TYPE == 'Ubuntu' ]; then
+        echo "Installing Ubuntu packages"
+        sudo apt-get install -y spawn-fcgi fcgiwrap
+    fi
 }
 
+###########################################################################
+###########################################################################
 function add_python_packages {
-    packages="PyJWT yamllint  py-setproctitle"
+    packages="PyJWT yamllint json5"  #  py-setproctitle"
     echo "Installing python libraries: ${packages}"
     for pkg in $packages ; do
         pip -q install $pkg
     done
 }
 
-get_basedir
-setup_supervisor
-# FIXME:  Instead, patch so we run logger_manager from our dir ??
-overwrite_logger_manager
+###########################################################################
+###########################################################################
+function setup_nginx {
+    echo "Setting up NGinx"
+    NGINXDIR=${OPENRVDAS_ROOT}/sqlite_gui/nginx
+    cp ${NGINXDIR}/nginx_sqlite.conf.dist ${NGINXDIR}/nginx_sqlite.conf
+
+    # Fill in wildcards for differences between architectures
+    $SED_IE "s#OPENRVDAS_ROOT#${OPENRVDAS_ROOT}#g" ${NGINXDIR}/nginx_sqlite.conf
+    $SED_IE "s#RVDAS_USER#${RVDAS_USER}#g" ${NGINXDIR}/nginx_sqlite.conf
+    $SED_IE "s#NGINX_PATH#${NGINX_PATH}#g" ${NGINXDIR}/nginx_sqlite.conf
+    $SED_IE "s#NGINX_FILES#${NGINX_FILES}#g" ${NGINXDIR}/nginx_sqlite.conf
+    $SED_IE "s#FCGI_PATH#${FCGI_PATH}#g" ${NGINXDIR}/nginx_sqlite.conf
+    $SED_IE "s#FCGI_SOCKET#${FCGI_SOCKET}#g" ${NGINXDIR}/nginx_sqlite.conf
+
+    # ... well... you never know... use http
+    if [[ ${USE_HTTP} == 'yes' ]]; then
+        echo "Setting nginx to use (non-secure) port 80"
+        # sure, http2 is cool, but sed the sadness.
+
+        $SED_IE "s/listen.*9000.*/listen \*:9000;/" ${NGINXDIR}/nginx_sqlite.conf
+        $SED_IE "s/listen.*443.*/listen \*:80;/" ${NGINXDIR}/nginx_sqlite.conf
+    fi
+}
+
+###########################################################################
+###########################################################################
+###########################################################################
+###########################################################################
+# Start of actual script
+###########################################################################
+###########################################################################
+echo
+echo "SQLite-GUI configuration script for OpenRVDAS"
+
+###########################################################################
+# Load default variables from preferences file, if it exists
+set_default_variables
+
+###########################################################################
+# Parse command line arguments
+while [ $# -gt 0 ] ; do
+    case "$1" in
+         -f)
+             if [ -f $2 ] ; then
+                 source $2
+             else
+                 echo "Config file not found: $2"
+             fi
+             shift
+             ;;
+         -makecert)
+             MAKE_CERT=yes
+             ;;
+         -nomakecert)
+             MAKE_CERT=no
+             ;;
+         -OS_TYPE)
+             OS_TYPE=$2
+             shift
+             ;;
+         -openrvdas_root)
+             if [ -d $2 ] ; then
+                 OPENRVDAS_ROOT=$2
+             else
+                 echo "openrvdas_root not a directory: $2"
+             fi
+             shift
+             ;;
+         -randomsecret)
+             RANDOM_SECRET=yes
+             ;;
+         -secret)
+             SECRET=$2
+             shift
+             ;;
+         -user)
+             RVDAS_USER=$2
+             shift
+             ;;
+         -http)
+             USE_HTTP=yes
+             ;;
+         -h)
+             show_help
+             exit
+             ;;
+         *)
+             echo "Ignoring unknown option: $1"
+             ;;
+    esac
+    shift
+done
+
 # We might have OS_TYPE in prefs
-[[ -z "${OS_TYPE}" ]] && determine_flavor
+if [ -n "$OS_TYPE" ]; then
+    echo "OS type set to \"$OS_TYPE\""
+else
+    determine_flavor
+    echo "OS type inferred to be \"$OS_TYPE\""
+fi
+
+# MacOS sed uses different parameters. Sigh.
+if [ $OS_TYPE == 'MacOS' ]; then
+    SED_IE='/usr/bin/sed -Ie'
+else
+    SED_IE='/usr/bin/sed -ie'
+fi
+
+# Figure out where our installation is
+echo
+echo "############################################"
+get_openrvdas_root
+
+# Set ourselves up in the same virtual environment
+source ${OPENRVDAS_ROOT}/venv/bin/activate
+
+DEFAULT_RVDAS_USER=$RVDAS_USER
+read -p "User to set GUI up as? ($DEFAULT_RVDAS_USER) " RVDAS_USER
+RVDAS_USER=${RVDAS_USER:-$DEFAULT_RVDAS_USER}
+
+# Set up a helper file for CGI scripts
+cat >> ${OPENRVDAS_ROOT}/sqlite_gui/cgi-bin/openrvdas_vars.py << EOF
+# Helper variables from OpenRVDAS
+
+OPENRVDAS_ROOT = '${OPENRVDAS_ROOT}'
+EOF
+
+# As it says on the tin, set up the supervisor file
+echo
+echo "############################################"
+setup_supervisor
+
 # Generate cert/key for nginx if requested
-[[ ${MAKE_CERT} == 1 ]] && make_certificate
+echo
+echo "############################################"
+echo "Generating self-signed certificates in $OPENRVDAS_ROOT/openrvdas.[key,crt]"
+#[[ "${MAKE_CERT}" == 'yes' ]] && make_certificate
+make_certificate
+
 # Generate a random secret if requested
-[ ${RANDOM_SECRET} == 1 ] && SECRET=`random_secret`
+[ "${RANDOM_SECRET}" == 'yes' ] && SECRET=`random_secret`
 # If we have a secret (supplied or random), set it
 [ -n "${SECRET}" ] && set_secret
-# Add python packages 
+
+echo
+echo "############################################"
+# Add needed system and python packages
+add_system_packages
 add_python_packages
-# ... well... you never know... use http
-[[ ${USE_HTTP} == 1 ]] && downgrade_nginx
+
+echo
+echo "############################################"
+# Copy our NGinx config file into place and, if requested,
+# modify it to use vanilla HTTP
+setup_nginx
+
+echo
+echo "############################################"
+echo "Reloading/restarting supervisord"
+sudo supervisorctl reload
+#sleep 5
+#supervisorctl start sqlite:*
+
+echo "Success! Please run "
+echo
+echo "  cgi-bin/user_tool.py -add --user <user> --password <password>"
+echo
+echo "to create a user for the SQLite web interface. "
+echo
+echo "Happy logging..."

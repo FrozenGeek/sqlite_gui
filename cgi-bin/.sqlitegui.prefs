@@ -1,3 +1,0 @@
-OS_TYPE=CentOS
-MAKE_CERT=0
-BASEDIR=/opt/openrvdas

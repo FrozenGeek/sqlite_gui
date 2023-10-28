@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+
+<!--//
+//  supervisor.js
+//
+//  functions to read status of daemons from XMLRPC interface
+//  presented by supervisord (assuming you included the 
+//  web interface)
+//
+//  For a full(-ish) explanation of what's going on here, see
+//  supervisorjs.md
+//
+-->
+<html>
+  <head>
+    <link rel="stylesheet" id="theme-css" href="/js/bootstrap.min.css">
+  </head>
+  <body>
+    <table border="2" bordercolor="green">
+      <tr>
+        <td>Table 1</td>
+          <td> Table 1
+            <table border="2" bordercolor="blue">
+              <tr>
+                <td>Table 2</td>
+                <td>Table 2</td>
+              </tr>
+              <tr>
+                <td> Table 2 </td>
+                <td>Table 2</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td> Table 1 </td>
+          <td> Table 1. </td>
+        </tr>
+      </tr>
+    </table>
+    <table id='daemon-table' class='table table-striped table-responsive-sm'>
+    </table>
+    <script src="/js/bootstrap.bundle.min.js"></script>
+    <script src="/supervisor/supervisor.js"></script>
+</body>
+</html>
